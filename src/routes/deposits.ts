@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { HttpCode } from '../lib/errors';
 import { parsePositiveMoney } from '../lib/money';
 import * as fundingService from '../services/fundingService';
 
@@ -22,7 +23,7 @@ depositsRouter.post('/', async (req, res, next) => {
   try {
     const body = createDepositBody.parse(req.body);
     const deposit = await fundingService.createDeposit(body);
-    res.status(201).json({
+    res.status(HttpCode.Created).json({
       id: deposit.id,
       pspRef: deposit.pspRef,
       status: fundingService.fundingStatusLabel(deposit.status),

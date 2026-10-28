@@ -1,16 +1,21 @@
 export const HttpCode = {
+  Created: 201,
+  BadRequest: 400,
   NotFound: 404,
   Conflict: 409,
   UnprocessableEntity: 422,
+  InternalServerError: 500,
 } as const;
 
 export type HttpCode = (typeof HttpCode)[keyof typeof HttpCode];
 
+type HttpErrorCode = Exclude<HttpCode, typeof HttpCode.Created>;
+
 export class HttpError extends Error {
-  readonly statusCode: HttpCode;
+  readonly statusCode: HttpErrorCode;
   readonly body: { error: string } & Record<string, unknown>;
 
-  constructor(statusCode: HttpCode, error: string, extra?: Record<string, unknown>) {
+  constructor(statusCode: HttpErrorCode, error: string, extra?: Record<string, unknown>) {
     super(error);
     this.name = 'HttpError';
     this.statusCode = statusCode;
