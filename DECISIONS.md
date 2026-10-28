@@ -1,95 +1,54 @@
 # Decisions
 
-`test/wallet-flow.e2e.test.ts` is the contract. That file stays as written. Each section below is implemented only after the previous one matches its tests.
+Money correctness comes first. Auth, deployment, and Docker hardening are out of scope for this exercise.
 
-Auth, deployment, and Docker hardening stay out. The readme does not score them.
+## Locking
 
-## 1. Foundation
+A completed PSP callback locks the funding row with `SELECT … FOR UPDATE`, then locks the wallet. The order is always funding row, then wallet. The second concurrent callback blocks on the funding row, sees `completed`, and returns without a second credit. A unique `wallet_txs.funding_transaction_id` is the backstop: Postgres rejects a second ledger row for the same funding transaction even if the application check is wrong.
 
-Update `src/lib/money.ts` and `src/app.ts`. Add `src/lib/errors.ts`.
+Wagers and withdrawals lock only the wallet. They do not lock a funding row first, so they cannot deadlock with a callback that already holds one. Two wagers on the same wallet queue on that row. The second reads the balance the first committed.
 
-`money.ts` gains a parser for a positive decimal string and a `BigNumber` equality check. `100.50` and `100.500` are the same amount. Arithmetic stays on `BigNumber`. Route inputs stay strings.
+## Callback amount
 
-`errors.ts` holds business errors that carry an HTTP status. `app.ts` maps those errors to JSON. `ZodError` still returns `400` with `error: "validation_error"`.
+The callback amount must equal the deposit amount. `100.50` and `100.500` match, compared with `BigNumber`. A different amount returns `409` and leaves the deposit `pending`, so a corrected retry can still complete it. The PSP does not get to choose a different credit.
 
-## 2. Schema
+The same terminal status again (`completed` then `completed`, or `failed` then `failed`) returns `200` and does not write another ledger row. The opposite terminal status returns `409` and does not move money. An unknown `pspRef` returns `404`.
 
-Add two migrations and two models. Update `src/db/models/index.ts`.
+## Schema
 
-`funding_transactions` stores deposits and withdrawals.
+Deposits and withdrawals share `funding_transactions`. A deposit requires `psp_ref` and `turnover_multiplier`. A withdrawal leaves both null. Status in the database is lowercase. JSON uses `Pending`, `Completed`, and `Failed`.
 
-| Column | Meaning |
-|---|---|
-| `id` | UUID |
-| `member_id`, `wallet_id` | Owner |
-| `type` | `deposit` or `withdrawal` |
-| `status` | `pending`, `completed`, `failed` |
-| `amount` | `DECIMAL(36,18)`, the amount the member asked for |
-| `turnover_multiplier` | Deposits only. Default 1 |
-| `psp_ref` | Unique. Deposits only |
+`wallet_txs` is the ledger. Amounts are always positive. Direction is the row type: `deposit_credit`, `wager_debit`, `withdrawal_debit`. The wallet balance is the signed sum of that ledger. `wallets.balance` is a read cache updated in the same transaction as the ledger row.
 
-`wallet_txs` is an append-only ledger.
+Turnover is not stored as a counter. Inside the transaction that holds the wallet lock, required turnover is `SUM(amount * turnover_multiplier)` over completed deposits, and accrued turnover is `SUM(amount)` over `wager_debit` rows. The check runs before the balance check. A shortfall returns `422` with `outstanding`. Cached counters are a later optimization if that `SUM` becomes hot.
 
-| Column | Meaning |
-|---|---|
-| `wallet_id` | Wallet whose balance changed |
-| `funding_transaction_id` | Unique, nullable. Set for deposits and withdrawals. Null for wagers |
-| `type` | `deposit_credit`, `wager_debit`, `withdrawal_debit` |
-| `amount` | Always positive. Direction comes from `type` |
+## What I would do next
 
-`wallets.balance` stays a read cache. It is updated in the same transaction as the ledger row, and the new balance equals the ledger sum. The unique `funding_transaction_id` makes a second credit for one deposit impossible.
-
-Stored status values are lowercase. JSON responses use `Pending`, `Completed`, and `Failed`, which is what the tests assert. Callback requests send `completed` or `failed`.
-
-## 3. Deposit
-
-Add `src/routes/deposits.ts` and `src/services/fundingService.ts`. Mount the route in `app.ts`.
-
-`POST /deposits` returns `201` and `{ id, pspRef, status: "Pending" }`. `pspRef` is `crypto.randomUUID()`. No wallet update and no ledger row.
-
-`turnoverMultiplier` defaults to `1`. An unknown member returns `404` `{ error: "member not found" }`. A non-positive amount, or a multiplier that is not an integer ≥ 0, returns `400`.
-
-## 4. PSP callback
-
-Add `src/routes/psp.ts`. The transition lives in `fundingService`.
-
-Lock the funding row with `SELECT … FOR UPDATE`, then lock the wallet. Lock order is always funding row, then wallet.
-
-| Incoming state | Result |
-|---|---|
-| `pending` + `completed`, amount matches | One credit, status `completed`, response `2xx` and `Completed` |
-| `pending` + `failed` | Status `failed`, no credit, response `200` and `Failed` |
-| Same terminal status again | `2xx`, no second ledger row |
-| `completed` then `failed`, or `failed` then `completed` | `409`, balance unchanged |
-| Unknown `pspRef` | `404` `{ error: "deposit not found" }` |
-| Amount differs | `409`, deposit stays `pending`, balance unchanged. A later callback with the original amount can still complete |
-
-A mismatched amount does not move money and does not change state. The PSP does not get to choose a different credit. A corrected retry can still finish the original deposit.
-
-## 5. Wager
-
-Add `src/routes/wagers.ts` and `src/services/wagerService.ts`.
-
-`POST /wallets/:walletId/wagers` locks the wallet. Enough balance returns `201` with `amount`, writes a `wager_debit`, and decreases `wallets.balance`. Too little balance returns `422` `{ error: "insufficient_balance" }`. An unknown wallet returns `404` `{ error: "wallet not found" }`.
-
-Ten concurrent wagers of `100` against a balance of `100` accept one request. The balance ends at `0`.
-
-## 6. Withdrawal and notes
-
-Add `src/routes/withdrawals.ts`. Turnover and the debit live in `fundingService`. `DESIGN-PSP.md` is written at the repo root when this section is implemented.
-
-Check turnover first, then balance.
-
-- Required = sum of `amount × turnoverMultiplier` over `completed` deposits.
-- Accrued = sum of `wager_debit` amounts.
-- Short turnover returns `422` `{ error: "insufficient_turnover", outstanding }`.
-- Turnover met but balance short returns `422` `{ error: "insufficient_balance" }`.
-- A valid withdrawal returns `201` `{ id, status: "Pending" }`, debits the wallet immediately, writes a ledger row, and inserts a `pending` withdrawal. Approval is not built.
-
-Turnover is computed with `SUM` inside the transaction that holds the wallet lock. Cached counters are a later optimization if volume requires them.
-
-`DESIGN-PSP.md` describes a `PspAdapter` with `verify` and `parse`, producing a normalized event: `pspRef`, `completed | failed`, and a decimal string amount. The route verifies and normalizes, then calls the funding service. Per-PSP config holds the secret, the status map, and the amount unit. CI uses signed payload fixtures. It does not call a live PSP.
+- Stop updates and deletes on `wallet_txs` in the database. Append-only is an application rule today.
+- Reject a repeated `POST /withdrawals` with the same client key. A retry of a successful withdrawal currently debits again.
+- Add the human approval step for a pending withdrawal, and a compensating credit if it is rejected.
+- Build the PSP adapter registry in `DESIGN-PSP.md`. The callback route still speaks one mock shape.
 
 ## AI use
 
-The plan, the locking and amount-mismatch choices, and this file were drafted with Cursor Grok. The implementation that follows is reviewed against `wallet-flow.e2e.test.ts` and the readme.
+Human-in-the-loop. AI handled analysis and acceleration. Technical ownership stays with me.
+
+```
+AI
+ ↓
+Explore multiple solutions
+ ↓
+Trade-off analysis
+ ↓
+Developer / Tech Lead
+ ↓
+Architecture Decision
+ ↓
+AI-assisted implementation
+ ↓
+AI-assisted validation
+ ↓
+Human approval
+```
+
+I chose the architecture after that trade-off pass: lock the funding row before the wallet, leave a mismatched callback amount pending, and compute turnover with `SUM` inside the wallet lock. I also set the structure: HTTP status constants, singleton services, repositories, the route index, and the turnover SQL as named constants. AI then implemented the deposit, callback, wager, and withdrawal flow, and drafted `DESIGN-PSP.md` and this file. Validation is `test/wallet-flow.e2e.test.ts`. I approved each step before the next one was built.

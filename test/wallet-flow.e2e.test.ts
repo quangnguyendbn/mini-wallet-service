@@ -15,6 +15,7 @@
  */
 import request from 'supertest';
 import { createApp } from '../src/app';
+import { WalletTx } from '../src/db/models';
 import { sequelize } from '../src/db/sequelize';
 import '../src/db/models';
 import { dec } from '../src/lib/money';
@@ -376,5 +377,23 @@ describe('POST /withdrawals', () => {
     const res = await request(app).post('/withdrawals').send({ memberId, amount: '0' });
     expect(res.status).toBe(400);
     expect(res.body.error).toBe('validation_error');
+  });
+
+  it('reconstructs the wallet balance from the ledger', async () => {
+    const { memberId, walletId } = await createMember('wd-ledger');
+    await credit(memberId, '100.00', 0);
+    const wager = await request(app).post(`/wallets/${walletId}/wagers`).send({ amount: '10.00' });
+    expect(wager.status).toBe(201);
+    const withdrawal = await request(app).post('/withdrawals').send({ memberId, amount: '25.00' });
+    expect(withdrawal.status).toBe(201);
+
+    const rows = await WalletTx.findAll({ where: { walletId } });
+    const signed = rows.reduce((sum, row) => {
+      const amount = dec(row.amount);
+      return row.type === 'deposit_credit' ? sum.plus(amount) : sum.minus(amount);
+    }, dec('0'));
+
+    expectMoney(await balanceOf(memberId), signed.toFixed(18));
+    expectMoney(await balanceOf(memberId), '65.00');
   });
 });
