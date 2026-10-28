@@ -1,11 +1,16 @@
 import express, { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
+import { HttpError } from './lib/errors';
 import { healthRouter } from './routes/health';
 import { membersRouter } from './routes/members';
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
     res.status(400).json({ error: 'validation_error', details: err.issues });
+    return;
+  }
+  if (err instanceof HttpError) {
+    res.status(err.statusCode).json(err.body);
     return;
   }
   // eslint-disable-next-line no-console
