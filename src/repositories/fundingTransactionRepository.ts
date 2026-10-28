@@ -1,6 +1,13 @@
-import { Transaction } from 'sequelize';
+import { QueryTypes, Transaction } from 'sequelize';
 import { FundingTransaction } from '../db/models';
 import { FundingStatus, FundingType } from '../db/models/fundingTransaction';
+import { sequelize } from '../db/sequelize';
+
+const SUM_COMPLETED_DEPOSIT_TURNOVER_SQL = `
+  SELECT COALESCE(SUM(amount * turnover_multiplier), 0)::text AS total
+  FROM funding_transactions
+  WHERE member_id = $1 AND type = 'deposit' AND status = 'completed'
+`;
 
 type NewFundingTransaction = {
   memberId: string;
@@ -32,6 +39,15 @@ export class FundingTransactionRepository {
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
+  }
+
+  async sumCompletedDepositTurnover(memberId: string, transaction: Transaction): Promise<string> {
+    const rows = await sequelize.query<{ total: string }>(SUM_COMPLETED_DEPOSIT_TURNOVER_SQL, {
+      bind: [memberId],
+      transaction,
+      type: QueryTypes.SELECT,
+    });
+    return rows[0]?.total ?? '0';
   }
 
   updateStatus(

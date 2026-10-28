@@ -4,10 +4,12 @@ Backend Lead take-home. The task is described in [`CHALLENGE.md`](CHALLENGE.md).
 
 ## Done so far
 
-Deposits can be created and completed. Wagers and withdrawals are not built yet.
+Deposits, wagers, and withdrawals are implemented.
 
 - `POST /deposits` creates a `Pending` funding row and a `pspRef`. The wallet balance does not change.
 - `POST /psp/callbacks` locks that funding row, then the wallet. A matching `completed` callback credits the wallet once and writes one `deposit_credit` ledger row. A repeated callback does not credit again. A mismatched amount stays `Pending`. An illegal status change returns `409`.
+- `POST /wallets/:walletId/wagers` locks the wallet, writes a `wager_debit`, and rejects an overdraw.
+- `POST /withdrawals` checks turnover before balance. A shortfall returns `422` with `outstanding`. A valid withdrawal debits the wallet immediately and stays `Pending`.
 - `funding_transactions` stores deposits and withdrawals. `wallet_txs` is the append-only ledger. `funding_transaction_id` is unique, so one funding row cannot be credited twice.
 - Money is parsed and compared with `BigNumber`. `100.50` and `100.500` are the same amount.
 - HTTP statuses live in `src/constants/httpCode.ts`, grouped by response class. Business failures go through `HttpError`.

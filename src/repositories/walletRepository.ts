@@ -19,6 +19,10 @@ export class WalletRepository {
     return Wallet.findByPk(id, { transaction, lock: transaction.LOCK.UPDATE });
   }
 
+  lockByMemberId(memberId: string, transaction: Transaction): Promise<Wallet | null> {
+    return Wallet.findOne({ where: { memberId }, transaction, lock: transaction.LOCK.UPDATE });
+  }
+
   create(memberId: string, balance: string, transaction: Transaction): Promise<Wallet> {
     return Wallet.create({ memberId, balance }, { transaction });
   }

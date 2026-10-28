@@ -3,8 +3,8 @@ import { Transaction } from 'sequelize';
 import { FundingTransaction } from '../db/models';
 import { FundingStatus } from '../db/models/fundingTransaction';
 import { sequelize } from '../db/sequelize';
-import { conflict, depositNotFound, memberNotFound, walletNotFound } from '../lib/errors';
-import { dec, parsePositiveMoney, sameMoney } from '../lib/money';
+import { conflict, depositNotFound, insufficientBalance, insufficientTurnover, memberNotFound, walletNotFound } from '../lib/errors';
+import { ZERO, dec, parsePositiveMoney, sameMoney } from '../lib/money';
 import { FundingTransactionRepository } from '../repositories/fundingTransactionRepository';
 import { MemberRepository } from '../repositories/memberRepository';
 import { WalletRepository } from '../repositories/walletRepository';
@@ -26,6 +26,11 @@ type CreateDepositInput = {
   memberId: string;
   amount: string;
   turnoverMultiplier: number;
+};
+
+type CreateWithdrawalInput = {
+  memberId: string;
+  amount: string;
 };
 
 export class FundingService {
@@ -123,6 +128,60 @@ export class FundingService {
     );
     await this.wallets.updateBalance(wallet, balance, transaction);
     await this.fundingTransactions.updateStatus(deposit, 'completed', transaction);
+  }
+
+  async createWithdrawal(input: CreateWithdrawalInput): Promise<FundingTransaction> {
+    const amount = parsePositiveMoney(input.amount).toFixed(18);
+    return sequelize.transaction(async (transaction) => {
+      const member = await this.members.findById(input.memberId, transaction);
+      if (!member) {
+        throw memberNotFound();
+      }
+
+      const wallet = await this.wallets.lockByMemberId(member.id, transaction);
+      if (!wallet) {
+        throw walletNotFound();
+      }
+
+      await this.assertTurnoverMet(member.id, wallet.id, transaction);
+      if (dec(wallet.balance).lt(dec(amount))) {
+        throw insufficientBalance();
+      }
+
+      const withdrawal = await this.fundingTransactions.create(
+        {
+          memberId: member.id,
+          walletId: wallet.id,
+          type: 'withdrawal',
+          status: 'pending',
+          amount,
+          turnoverMultiplier: null,
+          pspRef: null,
+        },
+        transaction,
+      );
+      await this.walletTxs.create(
+        {
+          walletId: wallet.id,
+          fundingTransactionId: withdrawal.id,
+          type: 'withdrawal_debit',
+          amount,
+        },
+        transaction,
+      );
+      const balance = dec(wallet.balance).minus(dec(amount)).toFixed(18);
+      await this.wallets.updateBalance(wallet, balance, transaction);
+      return withdrawal;
+    });
+  }
+
+  private async assertTurnoverMet(memberId: string, walletId: string, transaction: Transaction): Promise<void> {
+    const required = dec(await this.fundingTransactions.sumCompletedDepositTurnover(memberId, transaction));
+    const accrued = dec(await this.walletTxs.sumAmount(walletId, 'wager_debit', transaction));
+    const outstanding = required.minus(accrued);
+    if (outstanding.gt(ZERO)) {
+      throw insufficientTurnover(outstanding.toFixed(18));
+    }
   }
 }
 

@@ -4,6 +4,7 @@ import { healthRouter } from './health';
 import { membersRouter } from './members';
 import { pspRouter } from './psp';
 import { wagersRouter } from './wagers';
+import { withdrawalsRouter } from './withdrawals';
 
 export function mountRoutes(app: Express): void {
   app.use('/health', healthRouter);
@@ -11,4 +12,5 @@ export function mountRoutes(app: Express): void {
   app.use('/deposits', depositsRouter);
   app.use('/psp', pspRouter);
   app.use('/wallets', wagersRouter);
+  app.use('/withdrawals', withdrawalsRouter);
 }
