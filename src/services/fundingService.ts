@@ -1,10 +1,14 @@
 import { randomUUID } from 'crypto';
 import { Transaction } from 'sequelize';
-import { FundingTransaction, Member, Wallet, WalletTx } from '../db/models';
+import { FundingTransaction } from '../db/models';
 import { FundingStatus } from '../db/models/fundingTransaction';
 import { sequelize } from '../db/sequelize';
 import { conflict, depositNotFound, memberNotFound, walletNotFound } from '../lib/errors';
 import { dec, parsePositiveMoney, sameMoney } from '../lib/money';
+import { FundingTransactionRepository } from '../repositories/fundingTransactionRepository';
+import { MemberRepository } from '../repositories/memberRepository';
+import { WalletRepository } from '../repositories/walletRepository';
+import { WalletTxRepository } from '../repositories/walletTxRepository';
 
 const statusLabel: Record<FundingStatus, string> = {
   pending: 'Pending',
@@ -25,23 +29,42 @@ type CreateDepositInput = {
 };
 
 export class FundingService {
+  private static instance: FundingService | undefined;
+
+  private constructor(
+    private readonly members: MemberRepository,
+    private readonly wallets: WalletRepository,
+    private readonly fundingTransactions: FundingTransactionRepository,
+    private readonly walletTxs: WalletTxRepository,
+  ) {}
+
+  static getInstance(): FundingService {
+    FundingService.instance ??= new FundingService(
+      MemberRepository.getInstance(),
+      WalletRepository.getInstance(),
+      FundingTransactionRepository.getInstance(),
+      WalletTxRepository.getInstance(),
+    );
+    return FundingService.instance;
+  }
+
   fundingStatusLabel(status: FundingStatus): string {
     return statusLabel[status];
   }
 
   async createDeposit(input: CreateDepositInput): Promise<FundingTransaction> {
-    const member = await Member.findByPk(input.memberId);
+    const member = await this.members.findById(input.memberId);
     if (!member) {
       throw memberNotFound();
     }
 
-    const wallet = await Wallet.findOne({ where: { memberId: member.id } });
+    const wallet = await this.wallets.findByMemberId(member.id);
     if (!wallet) {
       throw walletNotFound();
     }
 
     const amount = parsePositiveMoney(input.amount);
-    return FundingTransaction.create({
+    return this.fundingTransactions.create({
       memberId: member.id,
       walletId: wallet.id,
       type: 'deposit',
@@ -54,32 +77,23 @@ export class FundingService {
 
   async applyDepositCallback(input: DepositCallback): Promise<FundingTransaction> {
     return sequelize.transaction(async (transaction) => {
-      const deposit = await this.lockDeposit(input.pspRef, transaction);
+      const deposit = await this.fundingTransactions.lockDepositByPspRef(input.pspRef, transaction);
+      if (!deposit) {
+        throw depositNotFound();
+      }
       if (deposit.status === input.status) {
         return deposit;
       }
 
       this.assertCallbackApplies(deposit, input);
       if (input.status === 'failed') {
-        await deposit.update({ status: 'failed' }, { transaction });
+        await this.fundingTransactions.updateStatus(deposit, 'failed', transaction);
         return deposit;
       }
 
       await this.creditDeposit(deposit, transaction);
       return deposit;
     });
-  }
-
-  private async lockDeposit(pspRef: string, transaction: Transaction): Promise<FundingTransaction> {
-    const deposit = await FundingTransaction.findOne({
-      where: { pspRef, type: 'deposit' },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (!deposit) {
-      throw depositNotFound();
-    }
-    return deposit;
   }
 
   private assertCallbackApplies(deposit: FundingTransaction, input: DepositCallback): void {
@@ -92,27 +106,24 @@ export class FundingService {
   }
 
   private async creditDeposit(deposit: FundingTransaction, transaction: Transaction): Promise<void> {
-    const wallet = await Wallet.findByPk(deposit.walletId, {
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
+    const wallet = await this.wallets.lockById(deposit.walletId, transaction);
     if (!wallet) {
       throw walletNotFound();
     }
 
     const balance = dec(wallet.balance).plus(dec(deposit.amount)).toFixed(18);
-    await WalletTx.create(
+    await this.walletTxs.create(
       {
         walletId: wallet.id,
         fundingTransactionId: deposit.id,
         type: 'deposit_credit',
         amount: deposit.amount,
       },
-      { transaction },
+      transaction,
     );
-    await wallet.update({ balance }, { transaction });
-    await deposit.update({ status: 'completed' }, { transaction });
+    await this.wallets.updateBalance(wallet, balance, transaction);
+    await this.fundingTransactions.updateStatus(deposit, 'completed', transaction);
   }
 }
 
-export const fundingService = new FundingService();
+export const fundingService = FundingService.getInstance();
