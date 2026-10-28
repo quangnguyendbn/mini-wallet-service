@@ -1,15 +1,10 @@
-export const HttpCode = {
-  Created: 201,
-  BadRequest: 400,
-  NotFound: 404,
-  Conflict: 409,
-  UnprocessableEntity: 422,
-  InternalServerError: 500,
-} as const;
+import { HTTP_CODE } from '../constants/httpCode';
 
-export type HttpCode = (typeof HttpCode)[keyof typeof HttpCode];
+type GroupCode<T> = T[keyof T];
 
-type HttpErrorCode = Exclude<HttpCode, typeof HttpCode.Created>;
+type HttpErrorCode =
+  | GroupCode<typeof HTTP_CODE.CLIENT_ERROR>
+  | GroupCode<typeof HTTP_CODE.SERVER_ERROR>;
 
 export class HttpError extends Error {
   readonly statusCode: HttpErrorCode;
@@ -24,25 +19,25 @@ export class HttpError extends Error {
 }
 
 export function memberNotFound(): HttpError {
-  return new HttpError(HttpCode.NotFound, 'member not found');
+  return new HttpError(HTTP_CODE.CLIENT_ERROR.NOT_FOUND, 'member not found');
 }
 
 export function walletNotFound(): HttpError {
-  return new HttpError(HttpCode.NotFound, 'wallet not found');
+  return new HttpError(HTTP_CODE.CLIENT_ERROR.NOT_FOUND, 'wallet not found');
 }
 
 export function depositNotFound(): HttpError {
-  return new HttpError(HttpCode.NotFound, 'deposit not found');
+  return new HttpError(HTTP_CODE.CLIENT_ERROR.NOT_FOUND, 'deposit not found');
 }
 
 export function insufficientBalance(): HttpError {
-  return new HttpError(HttpCode.UnprocessableEntity, 'insufficient_balance');
+  return new HttpError(HTTP_CODE.CLIENT_ERROR.UNPROCESSABLE_ENTITY, 'insufficient_balance');
 }
 
 export function insufficientTurnover(outstanding: string): HttpError {
-  return new HttpError(HttpCode.UnprocessableEntity, 'insufficient_turnover', { outstanding });
+  return new HttpError(HTTP_CODE.CLIENT_ERROR.UNPROCESSABLE_ENTITY, 'insufficient_turnover', { outstanding });
 }
 
 export function conflict(error: string): HttpError {
-  return new HttpError(HttpCode.Conflict, error);
+  return new HttpError(HTTP_CODE.CLIENT_ERROR.CONFLICT, error);
 }

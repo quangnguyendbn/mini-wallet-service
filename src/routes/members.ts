@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { HttpCode, walletNotFound } from '../lib/errors';
+import { HTTP_CODE } from '../constants/httpCode';
+import { walletNotFound } from '../lib/errors';
 import * as memberService from '../services/memberService';
 
 export const membersRouter = Router();
@@ -13,7 +14,7 @@ membersRouter.post('/', async (req, res, next) => {
   try {
     const body = createMemberBody.parse(req.body);
     const { member, wallet } = await memberService.createMember(body.username);
-    res.status(HttpCode.Created).json({
+    res.status(HTTP_CODE.SUCCESSFUL.CREATED).json({
       member: { id: member.id, username: member.username },
       wallet: { id: wallet.id, balance: wallet.balance },
     });

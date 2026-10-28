@@ -1,13 +1,14 @@
 import express, { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
-import { HttpCode, HttpError } from './lib/errors';
+import { HTTP_CODE } from './constants/httpCode';
+import { HttpError } from './lib/errors';
 import { depositsRouter } from './routes/deposits';
 import { healthRouter } from './routes/health';
 import { membersRouter } from './routes/members';
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
-    res.status(HttpCode.BadRequest).json({ error: 'validation_error', details: err.issues });
+    res.status(HTTP_CODE.CLIENT_ERROR.BAD_REQUEST).json({ error: 'validation_error', details: err.issues });
     return;
   }
   if (err instanceof HttpError) {
@@ -16,7 +17,7 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
   // eslint-disable-next-line no-console
   console.error(err);
-  res.status(HttpCode.InternalServerError).json({ error: 'internal_error' });
+  res.status(HTTP_CODE.SERVER_ERROR.INTERNAL_SERVER_ERROR).json({ error: 'internal_error' });
 };
 
 export function createApp() {
