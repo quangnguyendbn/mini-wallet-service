@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HTTP_CODE } from '../constants/httpCode';
 import { parsePositiveMoney } from '../lib/money';
-import * as fundingService from '../services/fundingService';
+import { fundingService } from '../services/fundingService';
 
 export const depositsRouter = Router();
 

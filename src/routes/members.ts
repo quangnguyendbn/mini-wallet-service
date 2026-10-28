@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { HTTP_CODE } from '../constants/httpCode';
 import { walletNotFound } from '../lib/errors';
-import * as memberService from '../services/memberService';
+import { memberService } from '../services/memberService';
 
 export const membersRouter = Router();
 
