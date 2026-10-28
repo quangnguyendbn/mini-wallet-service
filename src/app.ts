@@ -2,11 +2,7 @@ import express, { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { HTTP_CODE } from './constants/httpCode';
 import { HttpError } from './lib/errors';
-import { depositsRouter } from './routes/deposits';
-import { healthRouter } from './routes/health';
-import { membersRouter } from './routes/members';
-import { pspRouter } from './routes/psp';
-import { wagersRouter } from './routes/wagers';
+import { depositsRouter, healthRouter, membersRouter, pspRouter, wagersRouter } from './routes';
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
