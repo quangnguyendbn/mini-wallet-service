@@ -24,10 +24,31 @@ Turnover is not stored as a counter. Inside the transaction that holds the walle
 
 ## What I would do next
 
-- Stop updates and deletes on `wallet_txs` in the database. Append-only is an application rule today.
-- Reject a repeated `POST /withdrawals` with the same client key. A retry of a successful withdrawal currently debits again.
-- Add the human approval step for a pending withdrawal, and a compensating credit if it is rejected.
-- Build the PSP adapter registry in `DESIGN-PSP.md`. The callback route still speaks one mock shape.
+Money first. Auth, Docker, and a queue do not fix a wrong balance.
+
+### Money
+
+- Revoke `UPDATE` and `DELETE` on `wallet_txs`. Append-only is an application rule today.
+- Require an idempotency key on `POST /withdrawals`. A retry of a successful withdrawal currently debits again, because a withdrawal has no `pspRef` to reject the duplicate.
+- Reconcile `wallets.balance` against the signed ledger and alert when they differ. The e2e test checks one flow. Production needs a job.
+- Approve or reject a pending withdrawal. Approval completes it. Rejection writes a `withdrawal_credit` in the same transaction as the status change. The original debit stays.
+- Update the balance in SQL (`balance = balance + amount`) inside the transaction that already holds the wallet lock.
+
+### PSP
+
+- Build the adapter registry in `DESIGN-PSP.md`: `verify`, then `parse`, then `FundingService`. The callback route still accepts one mock body.
+- Keep the raw body for the signature. `express.json()` parses the body first, so an adapter cannot verify a signature today.
+- Reject a callback that is too old, or whose signature was already used, before it reaches the state machine.
+
+### Turnover
+
+- Index the two `SUM` queries: completed deposits by member, and `wager_debit` rows by wallet.
+- If those sums get hot, keep a counter updated in the same transaction as the ledger row. The counter is a cache. The ledger stays the source of truth.
+
+### Outside this exercise
+
+- Authenticate the caller and check that the wallet belongs to that member. `GET` wallet is open today.
+- Log and count `amount_mismatch`, `illegal_transition`, and duplicate callbacks. Do not log a PSP secret.
 
 ## AI use
 
