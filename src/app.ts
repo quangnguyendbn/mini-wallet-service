@@ -2,7 +2,7 @@ import express, { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { HTTP_CODE } from './constants/httpCode';
 import { HttpError } from './lib/errors';
-import { depositsRouter, healthRouter, membersRouter, pspRouter, wagersRouter } from './routes';
+import { mountRoutes } from './routes';
 
 const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   if (err instanceof ZodError) {
@@ -21,14 +21,7 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
 export function createApp() {
   const app = express();
   app.use(express.json());
-
-  app.use('/health', healthRouter);
-  app.use('/members', membersRouter);
-  app.use('/deposits', depositsRouter);
-  app.use('/psp', pspRouter);
-  app.use('/wallets', wagersRouter);
-  // Mount your new routes here.
-
+  mountRoutes(app);
   app.use(errorHandler);
   return app;
 }

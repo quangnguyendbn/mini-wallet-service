@@ -1,5 +1,14 @@
-export { depositsRouter } from './deposits';
-export { healthRouter } from './health';
-export { membersRouter } from './members';
-export { pspRouter } from './psp';
-export { wagersRouter } from './wagers';
+import { Express } from 'express';
+import { depositsRouter } from './deposits';
+import { healthRouter } from './health';
+import { membersRouter } from './members';
+import { pspRouter } from './psp';
+import { wagersRouter } from './wagers';
+
+export function mountRoutes(app: Express): void {
+  app.use('/health', healthRouter);
+  app.use('/members', membersRouter);
+  app.use('/deposits', depositsRouter);
+  app.use('/psp', pspRouter);
+  app.use('/wallets', wagersRouter);
+}
